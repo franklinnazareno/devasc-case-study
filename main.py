@@ -226,7 +226,18 @@ def approve_changes():
         else:
             return jsonify({'message': 'Failed to add loopback address'}), 500
     
+@app.route('/changes', methods=['DELETE'])
+@jwt_required()
+def deny_changes():
+    user = db.users.find_one({'email': get_jwt_identity()})
+    if (user['isL2'] == False):
+        return jsonify({'message': 'This can only be viewed by L2 Network Engineers.'}), 401
+    db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
+    changes = db.changes.find()
+    changesJson = json_util.dumps(changes)
 
+    return changesJson,200
+    
 @app.route('/change_hostname', methods=['POST'])
 @jwt_required()
 def change_hostname():
