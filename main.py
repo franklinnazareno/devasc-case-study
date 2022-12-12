@@ -1,4 +1,4 @@
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, request, jsonify, render_template
 from flask_jwt_extended import jwt_required, JWTManager, create_access_token, get_jwt_identity
 from pymongo import MongoClient
 from ncclient import manager
@@ -34,7 +34,7 @@ device = {
     }
 
 # Webex token that expires every 12 hours
-access_token = 'NzVkYzQ5Y2QtZjAxMi00ZThiLWJhZDItNDU1OGRiZTEyNGVkY2QzZTUxYzctOTY1_P0A1_4fbc8836-28d2-47cd-9b80-e05ba83c5673'
+access_token = 'MjQ1MmQxZDUtOTA5OS00ZTYxLWI3YjEtMzYzYWU1NmE5MGY2YjMwOTUxMDgtYWM0_P0A1_4fbc8836-28d2-47cd-9b80-e05ba83c5673'
 # Room ID for TIP Flower Boys
 room_id = 'Y2lzY29zcGFyazovL3VybjpURUFNOnVzLXdlc3QtMl9yL1JPT00vZmZkNzc0ZjAtMWRjMC0xMWVkLWFhYmYtYmJkZGJkOTIwYzNk'
 
@@ -54,22 +54,27 @@ def get_running_config_using_netconf():
             print(f'NETCONF operation failed: {e}')
             return None
 
-def change_hostname_using_netconf(hostname):
+def change_description_using_netconf(description, gig_interface):
     # Connect to the NETCONF device
     with manager.connect(**device) as m:
         # Build the XML configuration to change the hostname
         config = f"""
         <config>
-          <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
-             <hostname>{hostname}</hostname>
-          </native>
+        <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+        <interface>
+        <GigabitEthernet>
+            <name>{gig_interface}</name>
+            <description>{description}</description>
+        </GigabitEthernet>
+        </interface>
+        </native>
         </config>
         """
 
         # Send an <edit-config> NETCONF operation
         try:
             result = m.edit_config(target='running', config=config)
-            message = 'A member of L2 NE Team has approved or changed the hostname of the router to {}'.format(hostname)
+            message = 'A member of L2 NE Team has approved or changed the description of GigabitEthernet {} of the router to {}'.format(gig_interface, description)
             url = 'https://webexapis.com/v1/messages'
             headers = {
                 'Authorization': 'Bearer {}'.format(access_token),
@@ -82,6 +87,82 @@ def change_hostname_using_netconf(hostname):
         except RPCError as e:
             print(f'NETCONF operation failed: {e}')
             return None
+
+def edit_interface_using_netconf(gig_interface, address, mask):
+    # Connect to the NETCONF device
+    with manager.connect(**device) as m:
+        config = f"""
+        <config>
+        <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+        <interface>
+        <GigabitEthernet>
+            <name>{gig_interface}</name>
+            <description />
+            <ip>
+            <address>
+            <primary>
+            <address>{address}</address>
+            <mask>{mask}</mask>
+            </primary>
+            </address>
+            </ip>
+        </GigabitEthernet>
+        </interface>
+        </native>
+        </config>
+        """
+
+        # Send an <edit-config> NETCONF operation
+        try:
+            result = m.edit_config(target='running', config=config)
+            message = 'A member of L2 NE Team has approved or changed GigabitEthernet {} with an address and mask of {} {}'.format(gig_interface, address, mask)
+            url = 'https://webexapis.com/v1/messages'
+            headers = {
+                'Authorization': 'Bearer {}'.format(access_token),
+                'Content-Type': 'application/json'
+            }
+            params = {'roomId': room_id, 'markdown': message}
+            res = requests.post(url, headers=headers, json=params)
+            print(res.json())
+            return Response(json.dumps(xmltodict.parse(result.xml)), mimetype="application/json")
+        except RPCError as e:
+            print(f'NETCONF operation failed: {e}')
+            return None
+
+# def add_static_using_netconf(dest_add, mask, next_hop, out_int, distance):
+#     # Connect to the NETCONF device
+#     with manager.connect(**device) as m:
+#         config = f"""
+#         <config>
+#             <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+#                 <ip>
+#                 <route>
+#                     <destination>{dest_add}</destination>
+#                     <mask>{mask}</mask>
+#                     <next-hop>{next_hop}</next-hop>
+#                     <tag>{distance}</tag>
+#                 </route>
+#                 </ip>
+#             </native>
+#         </config>
+#         """
+
+#         # Send an <edit-config> NETCONF operation
+#         try:
+#             result = m.edit_config(target='running', config=config)
+#             message = 'A member of L2 NE Team has approved to add ip route {} {} {} {} {}'.format(dest_add, mask, next_hop, out_int, distance)
+#             url = 'https://webexapis.com/v1/messages'
+#             headers = {
+#                 'Authorization': 'Bearer {}'.format(access_token),
+#                 'Content-Type': 'application/json'
+#             }
+#             params = {'roomId': room_id, 'markdown': message}
+#             res = requests.post(url, headers=headers, json=params)
+#             print(res.json())
+#             return Response(json.dumps(xmltodict.parse(result.xml)), mimetype="application/json")
+#         except RPCError as e:
+#             print(f'NETCONF operation failed: {e}')
+#             return None
 
 def add_loopback_using_netconf(name, description, address, mask):
     # Connect to the NETCONF device
@@ -162,7 +243,8 @@ def register():
         'last_name': last_name,
         'email': email, 
         'password': password_hash,
-        'isL2': False}
+        'isL2': False,
+        'date': datetime.now()}
     db.users.insert_one(user)
 
     return jsonify({'message': 'Successfully registered'}), 201
@@ -211,13 +293,27 @@ def approve_changes():
     if (user['isL2'] == False):
         return jsonify({'message': 'This can only be viewed by L2 Network Engineers.'}), 401
     change = db.changes.find_one({"_id": ObjectId(request.args['changes'])})
-    if (change['changes'] == "change_hostname"):
-        success = change_hostname_using_netconf(change['hostname'])
+    if (change['changes'] == "change_description"):
+        success = change_description_using_netconf(change['description'], change['gig_interface'])
         if (success):
             change = db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
             return success, 200
         else:
-            return jsonify({'message': 'Failed to change hostname'}), 500
+            return jsonify({'message': 'Failed to change description'}), 500
+    elif (change['changes'] == "edit_interface"):
+        success = edit_interface_using_netconf(change['gig_interface'], change['address'], change['mask'])
+        if (success):
+            change = db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
+            return success, 200
+        else:
+            return jsonify({'message': 'Failed to edit GigabitEthernet interface'}), 500
+    # elif (change['changes'] == "add_static"):
+    #     success = add_static_using_netconf(change['dest_add'], change['mask'], change['next_hop'], change['out_int'], change['distance'])
+    #     if (success):
+    #         change = db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
+    #         return success, 200
+    #     else:
+    #         return jsonify({'message': 'Failed to add ip static route'}), 500
     elif (change['changes'] == "add_loopback"):
         success = add_loopback_using_netconf(change['name'], change['description'], change['address'], change['mask'])
         if (success):
@@ -225,36 +321,83 @@ def approve_changes():
             return success, 200
         else:
             return jsonify({'message': 'Failed to add loopback address'}), 500
-    
+
 @app.route('/changes', methods=['DELETE'])
 @jwt_required()
 def deny_changes():
     user = db.users.find_one({'email': get_jwt_identity()})
     if (user['isL2'] == False):
         return jsonify({'message': 'This can only be viewed by L2 Network Engineers.'}), 401
+    change = db.changes.find_one({"_id": ObjectId(request.args['changes'])})
+
+    if (change['changes'] == "change_description"):
+        message = 'A member of L2 NE Team denied to change the description of GigabitEthernet {} to "{}"'.format(change['gig_interface'], change['description'])
+        url = 'https://webexapis.com/v1/messages'
+        headers = {
+            'Authorization': 'Bearer {}'.format(access_token),
+            'Content-Type': 'application/json'
+        }
+        params = {'roomId': room_id, 'markdown': message}
+        res = requests.post(url, headers=headers, json=params)
+        print(res.json())
+    elif (change['changes'] == "edit_interface"):
+        message = 'A member of L2 NE Team denied to change GigabitEthernet {} with an address and mask of {} {}'.format(change['gig_interface'], change['address'], change['mask'])
+        url = 'https://webexapis.com/v1/messages'
+        headers = {
+            'Authorization': 'Bearer {}'.format(access_token),
+            'Content-Type': 'application/json'
+        }
+        params = {'roomId': room_id, 'markdown': message}
+        res = requests.post(url, headers=headers, json=params)
+        print(res.json())
+    # elif (change['changes'] == "add_static"):
+    #     message = 'A member of L2 NE Team denied to add ip route {} {} {} {} {}'.format(change['dest_add'], change['mask'], change['next_hop'], change['out_int'], change['distance'])
+    #     url = 'https://webexapis.com/v1/messages'
+    #     headers = {
+    #         'Authorization': 'Bearer {}'.format(access_token),
+    #         'Content-Type': 'application/json'
+    #     }
+    #     params = {'roomId': room_id, 'markdown': message}
+    #     res = requests.post(url, headers=headers, json=params)
+    #     print(res.json())
+    elif (change['changes'] == "add_loopback"):
+        message = 'A member of L2 NE Team denied to add or change Loopback{} with an address and mask of {} {}, and a description of "{}"'.format(change['name'], change['description'], change['address'], change['mask'])
+        url = 'https://webexapis.com/v1/messages'
+        headers = {
+            'Authorization': 'Bearer {}'.format(access_token),
+            'Content-Type': 'application/json'
+        }
+        params = {'roomId': room_id, 'markdown': message}
+        res = requests.post(url, headers=headers, json=params)
+        print(res.json())
+
     db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
     changes = db.changes.find()
     changesJson = json_util.dumps(changes)
-
     return changesJson,200
     
-@app.route('/change_hostname', methods=['POST'])
+@app.route('/change_description', methods=['POST'])
 @jwt_required()
-def change_hostname():
+def change_description():
     # Get the logged in user's claims
     user = db.users.find_one({'email': get_jwt_identity()})
 
     # Get the new hostname from the request body
-    hostname = request.json['hostname']
+    description = request.json['description']
+    gig_interface = request.json['gig_interface']
+
+    if (not(bool(gig_interface != 2) ^ bool(gig_interface != 3))):
+        return jsonify({'message': 'You can only configure GigabitEthernet interface 2 or 3'}), 401
 
     if (user['isL2'] == False):
         change = {
-            "changes": "change_hostname",
-            "hostname": hostname,
+            "changes": "change_description",
+            "description": description,
+            "gig_interface": gig_interface,
             "date": datetime.now()
         }
         db.changes.insert_one(change)
-        message = 'A member of L1 SE Team is requesting to change the hostname to "{}"'.format(hostname)
+        message = 'A member of L1 SE Team is requesting to change the description of GigabitEthernet {} to "{}"'.format(gig_interface, description)
         url = 'https://webexapis.com/v1/messages'
         headers = {
             'Authorization': 'Bearer {}'.format(access_token),
@@ -265,13 +408,103 @@ def change_hostname():
         print(res.json())
         return jsonify({'message': 'Your change request have been sent to the L2 Network Engineers.'}), 200
     # Use NETCONF to change the hostname of the router
-    success = change_hostname_using_netconf(hostname)
+    success = change_description_using_netconf(description, gig_interface)
 
     # Return a success message to the user
     if success:
         return success, 200
     else:
         return jsonify({'message': 'Failed to change hostname'}), 500
+
+@app.route('/edit_interface', methods=['POST'])
+@jwt_required()
+def edit_interface():
+    # Get the logged in user's claims
+    user = db.users.find_one({'email': get_jwt_identity()})
+
+    gig_interface = request.json['gig_interface']
+    address = request.json['address']
+    mask = request.json['mask']
+
+    if (not(bool(gig_interface != 2) ^ bool(gig_interface != 3))):
+        return jsonify({'message': 'You can only configure GigabitEthernet interface 2 or 3'}), 401
+
+    if (user['isL2'] == False):
+        change = {
+            "changes": "edit_interface",
+            "gig_interface": gig_interface,
+            "address": address,
+            "mask": mask,
+            "date": datetime.now()
+        }
+        db.changes.insert_one(change)
+        message = 'A member of L1 SE Team is requesting to change GigabitEthernet {} with the address and mask of {} {}'.format(gig_interface, address, mask)
+        url = 'https://webexapis.com/v1/messages'
+        headers = {
+            'Authorization': 'Bearer {}'.format(access_token),
+            'Content-Type': 'application/json'
+        }
+        params = {'roomId': room_id, 'markdown': message}
+        res = requests.post(url, headers=headers, json=params)
+        print(res.json())
+        return jsonify({'message': 'Your change request have been sent to the L2 Network Engineers.'}), 200
+
+    success = edit_interface_using_netconf(gig_interface, address, mask)
+
+    # Return a success message to the user
+    if success:
+        return success, 200
+    else:
+        return jsonify({'message': 'Failed to add change GigabitEthernet interface'}), 500
+
+# @app.route('/add_static', methods=['POST'])
+# @jwt_required()
+# def add_static():
+#     # Get the logged in user's claims
+#     user = db.users.find_one({'email': get_jwt_identity()})
+
+#     dest_add = request.json['dest_add']
+#     mask = request.json['mask']
+#     next_hop = request.json['next_hop']
+#     out_int = request.json['out_int']
+
+#     if (not(bool(out_int != 2) ^ bool(out_int != 3))):
+#         return jsonify({'message': 'You can only exit in GigabitEthernet interface 2 or 3'}), 401
+#     out_int = "GigabitEthernet"+str(out_int)
+#     try:
+#         distance = request.json['distance']
+#     except:
+#         distance = 1
+
+#     if (user['isL2'] == False):
+#         change = {
+#             "changes": "add_static",
+#             "dest_add": dest_add,
+#             "mask": mask,
+#             "next_hop": next_hop,
+#             "out_int": out_int,
+#             "distance": distance,
+#             "date": datetime.now()
+#         }
+#         db.changes.insert_one(change)
+#         message = 'A member of L1 SE Team has requested to add ip route {} {} {} {} {}'.format(dest_add, mask, next_hop, out_int, distance)
+#         url = 'https://webexapis.com/v1/messages'
+#         headers = {
+#             'Authorization': 'Bearer {}'.format(access_token),
+#             'Content-Type': 'application/json'
+#         }
+#         params = {'roomId': room_id, 'markdown': message}
+#         res = requests.post(url, headers=headers, json=params)
+#         print(res.json())
+#         return jsonify({'message': 'Your change request have been sent to the L2 Network Engineers.'}), 200
+
+#     success = add_static_using_netconf(dest_add, mask, next_hop, out_int, distance)
+
+#     # Return a success message to the user
+#     if success:
+#         return success, 200
+#     else:
+#         return jsonify({'message': 'Failed to add ip static route'}), 500
 
 @app.route('/add_loopback', methods=['POST'])
 @jwt_required()
