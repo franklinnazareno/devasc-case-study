@@ -391,8 +391,10 @@ def change_description():
     description = request.json['description']
     gig_interface = request.json['gig_interface']
 
-    if (not(bool(gig_interface != 2) ^ bool(gig_interface != 3))):
-        return jsonify({'message': 'You can only configure GigabitEthernet interface 2 or 3'}), 401
+    # if (not(bool(gig_interface != 2) ^ bool(gig_interface != 3))):
+    #     return jsonify({'message': 'You can only configure GigabitEthernet interface 2 or 3'}), 401
+    if (gig_interface != 1):
+        return jsonify({'message': 'You can only configure GigabitEthernet interface 1'}), 401
 
     if (user['isL2'] == False):
         change = {
@@ -431,8 +433,10 @@ def edit_interface():
     address = request.json['address']
     mask = request.json['mask']
 
-    if (not(bool(gig_interface != 2) ^ bool(gig_interface != 3))):
-        return jsonify({'message': 'You can only configure GigabitEthernet interface 2 or 3'}), 401
+    # if (not(bool(gig_interface != 2) ^ bool(gig_interface != 3))):
+    #     return jsonify({'message': 'You can only configure GigabitEthernet interface 2 or 3'}), 401
+    if (gig_interface != 1):
+        return jsonify({'message': 'You can only configure GigabitEthernet interface 1'}), 401
 
     if (user['isL2'] == False):
         change = {
