@@ -27,14 +27,15 @@ client = MongoClient("mongodb+srv://group-3-software-design:YCpTgKjSJYY17sBF@con
 db = client.test2
 
 device = {
-        'host': 'sandbox-iosxe-recomm-1.cisco.com',
+        'host': '192.168.56.101',
         'port': 830,
-        'username': 'developer',
-        'password': 'C1sco12345',
+        'username': 'cisco',
+        'password': 'cisco123!',
+        'hostkey_verify': False
     }
 
 # Webex token that expires every 12 hours
-access_token = 'MjQ1MmQxZDUtOTA5OS00ZTYxLWI3YjEtMzYzYWU1NmE5MGY2YjMwOTUxMDgtYWM0_P0A1_4fbc8836-28d2-47cd-9b80-e05ba83c5673'
+access_token = 'ODFmOTY1OTUtZjg3Ni00NmYyLWFmYzUtZDE4YzlkZDFkNWM5YTA4MGZmYjItNGIw_P0A1_4fbc8836-28d2-47cd-9b80-e05ba83c5673'
 # Room ID for TIP Flower Boys
 room_id = 'Y2lzY29zcGFyazovL3VybjpURUFNOnVzLXdlc3QtMl9yL1JPT00vZmZkNzc0ZjAtMWRjMC0xMWVkLWFhYmYtYmJkZGJkOTIwYzNk'
 
@@ -129,40 +130,44 @@ def edit_interface_using_netconf(gig_interface, address, mask):
             print(f'NETCONF operation failed: {e}')
             return None
 
-# def add_static_using_netconf(dest_add, mask, next_hop, out_int, distance):
-#     # Connect to the NETCONF device
-#     with manager.connect(**device) as m:
-#         config = f"""
-#         <config>
-#             <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
-#                 <ip>
-#                 <route>
-#                     <destination>{dest_add}</destination>
-#                     <mask>{mask}</mask>
-#                     <next-hop>{next_hop}</next-hop>
-#                     <tag>{distance}</tag>
-#                 </route>
-#                 </ip>
-#             </native>
-#         </config>
-#         """
+def add_ospf_using_netconf(process_id, router_id, ip, mask, area):
+    # Connect to the NETCONF device
+    with manager.connect(**device) as m:
+        config = f"""
+        <config>
+            <native xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-native">
+            <router>
+                <ospf xmlns="http://cisco.com/ns/yang/Cisco-IOS-XE-ospf">
+                <id>{process_id}</id>
+                <router-id>{router_id}</router-id>
+                <network>
+                    <ip>{ip}</ip>
+                    <mask>{mask}</mask>
+                    <area>{area}</area>
+                </network>
+                </ospf>
+            </router>
+            </native>
+        </config>
+        """
 
-#         # Send an <edit-config> NETCONF operation
-#         try:
-#             result = m.edit_config(target='running', config=config)
-#             message = 'A member of L2 NE Team has approved to add ip route {} {} {} {} {}'.format(dest_add, mask, next_hop, out_int, distance)
-#             url = 'https://webexapis.com/v1/messages'
-#             headers = {
-#                 'Authorization': 'Bearer {}'.format(access_token),
-#                 'Content-Type': 'application/json'
-#             }
-#             params = {'roomId': room_id, 'markdown': message}
-#             res = requests.post(url, headers=headers, json=params)
-#             print(res.json())
-#             return Response(json.dumps(xmltodict.parse(result.xml)), mimetype="application/json")
-#         except RPCError as e:
-#             print(f'NETCONF operation failed: {e}')
-#             return None
+
+        # Send an <edit-config> NETCONF operation
+        try:
+            result = m.edit_config(target='running', config=config)
+            message = 'A member of L2 NE Team has approved to add router ospf {} with a router id of {} with network {} {} in area {}'.format(process_id, router_id, ip, mask, area)
+            url = 'https://webexapis.com/v1/messages'
+            headers = {
+                'Authorization': 'Bearer {}'.format(access_token),
+                'Content-Type': 'application/json'
+            }
+            params = {'roomId': room_id, 'markdown': message}
+            res = requests.post(url, headers=headers, json=params)
+            print(res.json())
+            return Response(json.dumps(xmltodict.parse(result.xml)), mimetype="application/json")
+        except RPCError as e:
+            print(f'NETCONF operation failed: {e}')
+            return None
 
 def add_loopback_using_netconf(name, description, address, mask):
     # Connect to the NETCONF device
@@ -307,13 +312,13 @@ def approve_changes():
             return success, 200
         else:
             return jsonify({'message': 'Failed to edit GigabitEthernet interface'}), 500
-    # elif (change['changes'] == "add_static"):
-    #     success = add_static_using_netconf(change['dest_add'], change['mask'], change['next_hop'], change['out_int'], change['distance'])
-    #     if (success):
-    #         change = db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
-    #         return success, 200
-    #     else:
-    #         return jsonify({'message': 'Failed to add ip static route'}), 500
+    elif (change['changes'] == "add_ospf"):
+        success = add_ospf_using_netconf(change['process_id'], change['router_id'], change['ip'], change['mask'], change['area'])
+        if (success):
+            change = db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
+            return success, 200
+        else:
+            return jsonify({'message': 'Failed to add ip static route'}), 500
     elif (change['changes'] == "add_loopback"):
         success = add_loopback_using_netconf(change['name'], change['description'], change['address'], change['mask'])
         if (success):
@@ -350,16 +355,16 @@ def deny_changes():
         params = {'roomId': room_id, 'markdown': message}
         res = requests.post(url, headers=headers, json=params)
         print(res.json())
-    # elif (change['changes'] == "add_static"):
-    #     message = 'A member of L2 NE Team denied to add ip route {} {} {} {} {}'.format(change['dest_add'], change['mask'], change['next_hop'], change['out_int'], change['distance'])
-    #     url = 'https://webexapis.com/v1/messages'
-    #     headers = {
-    #         'Authorization': 'Bearer {}'.format(access_token),
-    #         'Content-Type': 'application/json'
-    #     }
-    #     params = {'roomId': room_id, 'markdown': message}
-    #     res = requests.post(url, headers=headers, json=params)
-    #     print(res.json())
+    elif (change['changes'] == "add_ospf"):
+        message = 'A member of L2 NE Team has denied to add router ospf {} with a router id of {} with network {} {} in area {}'.format(change['process_id'], change['router_id'], change['ip'], change['mask'], change['area'])
+        url = 'https://webexapis.com/v1/messages'
+        headers = {
+            'Authorization': 'Bearer {}'.format(access_token),
+            'Content-Type': 'application/json'
+        }
+        params = {'roomId': room_id, 'markdown': message}
+        res = requests.post(url, headers=headers, json=params)
+        print(res.json())
     elif (change['changes'] == "add_loopback"):
         message = 'A member of L2 NE Team denied to add or change Loopback{} with an address and mask of {} {}, and a description of "{}"'.format(change['name'], change['description'], change['address'], change['mask'])
         url = 'https://webexapis.com/v1/messages'
@@ -457,54 +462,47 @@ def edit_interface():
     else:
         return jsonify({'message': 'Failed to add change GigabitEthernet interface'}), 500
 
-# @app.route('/add_static', methods=['POST'])
-# @jwt_required()
-# def add_static():
-#     # Get the logged in user's claims
-#     user = db.users.find_one({'email': get_jwt_identity()})
+@app.route('/add_ospf', methods=['POST'])
+@jwt_required()
+def add_static():
+    # Get the logged in user's claims
+    user = db.users.find_one({'email': get_jwt_identity()})
 
-#     dest_add = request.json['dest_add']
-#     mask = request.json['mask']
-#     next_hop = request.json['next_hop']
-#     out_int = request.json['out_int']
+    process_id = request.json['process_id']
+    router_id = request.json['router_id']
+    ip = request.json['ip']
+    mask = request.json['mask']
+    area = request.json['area']
 
-#     if (not(bool(out_int != 2) ^ bool(out_int != 3))):
-#         return jsonify({'message': 'You can only exit in GigabitEthernet interface 2 or 3'}), 401
-#     out_int = "GigabitEthernet"+str(out_int)
-#     try:
-#         distance = request.json['distance']
-#     except:
-#         distance = 1
+    if (user['isL2'] == False):
+        change = {
+            "changes": "add_ospf",
+            "process_id": process_id,
+            "router_id": router_id,
+            "ip": ip,
+            "mask": mask,
+            "area": area,
+            "date": datetime.now()
+        }
+        db.changes.insert_one(change)
+        message = 'A member of L1 SE Team has requested to add router ospf {} with a router id of {} with network {} {} in area {}'.format(process_id, router_id, ip, mask, area)
+        url = 'https://webexapis.com/v1/messages'
+        headers = {
+            'Authorization': 'Bearer {}'.format(access_token),
+            'Content-Type': 'application/json'
+        }
+        params = {'roomId': room_id, 'markdown': message}
+        res = requests.post(url, headers=headers, json=params)
+        print(res.json())
+        return jsonify({'message': 'Your change request have been sent to the L2 Network Engineers.'}), 200
 
-#     if (user['isL2'] == False):
-#         change = {
-#             "changes": "add_static",
-#             "dest_add": dest_add,
-#             "mask": mask,
-#             "next_hop": next_hop,
-#             "out_int": out_int,
-#             "distance": distance,
-#             "date": datetime.now()
-#         }
-#         db.changes.insert_one(change)
-#         message = 'A member of L1 SE Team has requested to add ip route {} {} {} {} {}'.format(dest_add, mask, next_hop, out_int, distance)
-#         url = 'https://webexapis.com/v1/messages'
-#         headers = {
-#             'Authorization': 'Bearer {}'.format(access_token),
-#             'Content-Type': 'application/json'
-#         }
-#         params = {'roomId': room_id, 'markdown': message}
-#         res = requests.post(url, headers=headers, json=params)
-#         print(res.json())
-#         return jsonify({'message': 'Your change request have been sent to the L2 Network Engineers.'}), 200
+    success = add_ospf_using_netconf(process_id, router_id, ip, mask, area)
 
-#     success = add_static_using_netconf(dest_add, mask, next_hop, out_int, distance)
-
-#     # Return a success message to the user
-#     if success:
-#         return success, 200
-#     else:
-#         return jsonify({'message': 'Failed to add ip static route'}), 500
+    # Return a success message to the user
+    if success:
+        return success, 200
+    else:
+        return jsonify({'message': 'Failed to add ip static route'}), 500
 
 @app.route('/add_loopback', methods=['POST'])
 @jwt_required()
