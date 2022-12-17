@@ -130,7 +130,7 @@ def edit_interface_using_netconf(gig_interface, address, mask):
             print(f'NETCONF operation failed: {e}')
             return None
 
-def add_ospf_using_netconf(process_id, router_id, ip, mask, area):
+def add_ospf_using_netconf(process_id, router_id, ip, mask, area, priority):
     # Connect to the NETCONF device
     with manager.connect(**device) as m:
         config = f"""
@@ -145,6 +145,7 @@ def add_ospf_using_netconf(process_id, router_id, ip, mask, area):
                     <mask>{mask}</mask>
                     <area>{area}</area>
                 </network>
+                <priority>{priority}</priority>
                 </ospf>
             </router>
             </native>
@@ -155,7 +156,7 @@ def add_ospf_using_netconf(process_id, router_id, ip, mask, area):
         # Send an <edit-config> NETCONF operation
         try:
             result = m.edit_config(target='running', config=config)
-            message = 'A member of L2 NE Team has approved to add router ospf {} with a router id of {} with network {} {} in area {}'.format(process_id, router_id, ip, mask, area)
+            message = 'A member of L2 NE Team has approved to add router ospf {} with a router id of {} with network {} {} in area {} with priority {}'.format(process_id, router_id, ip, mask, area, priority)
             url = 'https://webexapis.com/v1/messages'
             headers = {
                 'Authorization': 'Bearer {}'.format(access_token),
@@ -313,7 +314,7 @@ def approve_changes():
         else:
             return jsonify({'message': 'Failed to edit GigabitEthernet interface'}), 500
     elif (change['changes'] == "add_ospf"):
-        success = add_ospf_using_netconf(change['process_id'], change['router_id'], change['ip'], change['mask'], change['area'])
+        success = add_ospf_using_netconf(change['process_id'], change['router_id'], change['ip'], change['mask'], change['area'], change['priority'])
         if (success):
             change = db.changes.find_one_and_delete({"_id": ObjectId(request.args['changes'])})
             return success, 200
@@ -356,7 +357,7 @@ def deny_changes():
         res = requests.post(url, headers=headers, json=params)
         print(res.json())
     elif (change['changes'] == "add_ospf"):
-        message = 'A member of L2 NE Team has denied to add router ospf {} with a router id of {} with network {} {} in area {}'.format(change['process_id'], change['router_id'], change['ip'], change['mask'], change['area'])
+        message = 'A member of L2 NE Team has denied to add router ospf {} with a router id of {} with network {} {} in area {} with priority {}'.format(change['process_id'], change['router_id'], change['ip'], change['mask'], change['area'], change['priority'])
         url = 'https://webexapis.com/v1/messages'
         headers = {
             'Authorization': 'Bearer {}'.format(access_token),
@@ -477,6 +478,7 @@ def add_static():
     ip = request.json['ip']
     mask = request.json['mask']
     area = request.json['area']
+    priority = request.json['priority']
 
     if (user['isL2'] == False):
         change = {
@@ -486,6 +488,7 @@ def add_static():
             "ip": ip,
             "mask": mask,
             "area": area,
+            "priority": priority,
             "date": datetime.now()
         }
         db.changes.insert_one(change)
@@ -500,7 +503,7 @@ def add_static():
         print(res.json())
         return jsonify({'message': 'Your change request have been sent to the L2 Network Engineers.'}), 200
 
-    success = add_ospf_using_netconf(process_id, router_id, ip, mask, area)
+    success = add_ospf_using_netconf(process_id, router_id, ip, mask, area, priority)
 
     # Return a success message to the user
     if success:
